@@ -1,0 +1,309 @@
+---
+title: "Linear Regression And Its Cousins"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    default_style: "light"
+    downcute_theme: "default"
+---
+
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(caret)
+library(AppliedPredictiveModeling)
+library(pls)
+library(elasticnet)
+```
+
+## **Question 1:**
+
+**Developing a model to predict permeability (see Sect. 1.4) could save significant resources for a pharmaceutical company, while at the same time more rapidly identifying molecules that have a sufficient permeability to become a drug:**
+
+***a) Start R and use these commands to load the data:**
+`>library(AppliedPredictiveModeling)`
+`>data(permeability)`
+**The matrix fingerprints contains the 1,107 binary molecular predictors for the 165 compounds, while permeability contains permeability response.**
+
+Answer:
+
+
+
+```{r}
+data("permeability")
+```
+
+```{r}
+dim(fingerprints)
+```
+
+```{r}
+dim(permeability)
+```
+
+The matrix fingerprints contains the 1,107 binary molecular predictors for the 165 compounds, while permeability contains permeability response.
+
+**b)  The fingerprint predictors indicate the presence or absence of substructures of a molecule and are often sparse meaning that relatively few of the molecules contain each substructure. Filter out the predictors that have low frequencies using the `nearZeroVar` function from the `caret` package. How many predictors are left for modeling?**
+
+```{r}
+lowfreq <- nearZeroVar(fingerprints)
+```
+
+```{r}
+fingerprints <- fingerprints[, -lowfreq]
+
+dim(fingerprints)
+```
+
+There were 1,107 predictors and now there are only 388 predictors left for modeling.
+
+**c) Split the data into a training and a test set, pre-process the data, and tune a PLS model. How many latent variables are optimal and what is the corresponding resampled estimate of $R^2$?**
+
+
+```{r}
+set.seed(624)
+
+# index for training
+index <- createDataPartition(permeability, p = .8, list = FALSE)
+
+# train 
+train_perm <- permeability[index, ]
+train_fp <- fingerprints[index, ]
+# test
+test_perm <- permeability[-index, ]
+test_fp <- fingerprints [-index, ]
+
+# 10-fold cross-validation to make reasonable estimates
+ctrl <- trainControl(method = "cv", number = 10)
+
+plsTune <- train(train_fp, train_perm, method = "pls", metric = "Rsquared",
+             tuneLength = 20, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(plsTune)
+```
+
+```{r}
+plsTune
+```
+
+The optimal tuning had 12 components with a corresponding $R^2$ of 0.5131115
+ 
+**d) Predict the response for the test set. What is the test set estimate of $R^2$**
+
+
+```{r}
+fp_predict <- predict(plsTune, test_fp)
+
+postResample(fp_predict, test_perm)
+```
+
+The test set estimate of $R^2$ is 0.4741832.
+
+**e) Try building other models discussed in this chapter. Do any have better predictive performance?** 
+
+### {.tabset}
+#### Elastic Net Regression Model: 
+
+```{r warning=FALSE, message=FALSE}
+set.seed(624)
+
+# grid of penalties
+enetGrid <- expand.grid(.lambda = c(0, 0.01, .1), .fraction = seq(.05, 1, length = 20))
+
+# tuning penalized regression model
+enetTune <- train(train_fp, train_perm, method = "enet",
+                  tuneGrid = enetGrid, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(enetTune)
+```
+
+
+```{r}
+enetTune
+```
+
+
+```{r}
+enet_predict <- predict(enetTune, test_fp)
+
+postResample(enet_predict, test_perm)
+```
+
+#### Least Angle Regression:
+
+```{r}
+set.seed(624)
+
+larsTune <- train(train_fp, train_perm, method = "lars", metric = "Rsquared",
+                    tuneLength = 20, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(larsTune)
+```
+
+```{r}
+lars_predict <- predict(larsTune, test_fp)
+
+postResample(lars_predict, test_perm)
+```
+
+
+**f) Would you recommend any of your models to replace the permeability laboratory experiment?**
+
+I would recommend the Partial Least Squares model as it produced better statistics. It had a higher $R^2$ and lower RMSE and MAE.
+
+***
+
+## **Question 2:**
+
+**A chemical manufacturing process for a pharmaceutical product was discussed in Sect.1.4. In this problem, the objective is to understand the relationship between biological measurements of the raw materials (predictors), 6.5 Computing 139 measurements of the manufacturing process (predictors), and the response of product yield. Biological predictors cannot be changed but can be used to assess the quality of the raw material before processing. On the other hand, manufacturing process predictors can be changed in the manufacturing process. Improving product yield by 1% will boost revenue by approximately one hundred thousand dollars per batch:**
+
+**a) Start R and use these commands to load the data:** 
+`> library(AppliedPredictiveModeling)`
+`> data(chemicalManufacturing)`
+**The matrix `processPredictors` contains the 57 predictors (12 describing the input biological material and 45 describing the process predictors) for the 176 manufacturing runs. yield contains the percent yield for each run.**
+
+```{r}
+data("ChemicalManufacturingProcess")
+```
+
+**b) A small percentage of cells in the predictor set contain missing values. Use an imputation function to fill in these missing values (e.g., see Sect. 3.8)**
+
+```{r}
+sum(is.na(ChemicalManufacturingProcess))
+```
+
+Since we have 106 missing values in our data so in order to feed the data to model we have to take care of that so let's impute.
+
+```{r}
+miss <- preProcess(ChemicalManufacturingProcess, method = "bagImpute")
+Chemical <- predict(miss, ChemicalManufacturingProcess)
+```
+
+There were 106 missing values in `ChemicalManufacturingProcess`. Bagged trees were used to impute the data. Bagged trees are made using all the other variables.
+
+```{r}
+sum(is.na(Chemical))
+```
+As we can see that we have no missing values in our data now.
+
+**c) Split the data into a training and a test set, pre-process the data, and tune a model of your choice from this chapter. What is the optimal value of the performance metric?**
+
+Before creating model of choice let's split our data into testing and training.
+
+```{r}
+set.seed(624)
+Chemical <- Chemical[, -nearZeroVar(Chemical)]
+
+# index for training
+index <- createDataPartition(Chemical$Yield, p = .8, list = FALSE)
+
+# train 
+train_chem <- Chemical[index, ]
+
+# test
+test_chem <- Chemical[-index, ]
+```
+
+Now that our data has been split let's create model
+
+### {.tabset}
+
+#### Partial Least Sqaures (PLS):
+
+```{r}
+set.seed(624)
+
+plsTune <- train(Yield ~ ., Chemical , method = "pls", 
+             tuneLength = 20, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(plsTune) 
+```
+
+
+```{r}
+plsTune
+```
+
+Optimal tuning has 3 components with $R^2$ of 0.56337.
+ 
+#### Least Angle Regression (LAR):
+
+```{r}
+set.seed(624)
+
+larsTune <- train(Yield ~ ., Chemical , method = "lars", metric = "Rsquared",
+                    tuneLength = 20, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(larsTune)
+```
+
+```{r}
+larsTune
+```
+
+The optimal model has a fraction of 0.05 and $R^2$ of 0.6252.
+
+#### Ridge:
+
+```{r}
+set.seed(624)
+
+## Define the candidate set of values
+ridgeGrid <- data.frame(.lambda = seq(0, .1, length = 15))
+
+ridgeTune <- train(Yield ~ ., Chemical , method = "ridge",
+                     tuneGrid = ridgeGrid, trControl = ctrl, preProc = c("center", "scale"))
+
+plot(ridgeTune)
+```
+
+```{r}
+ridgeTune
+```
+
+The optimal model has λ of 0.1 and $R^2$ of 0.4803403.
+
+**d) Predict the response for the test set. What is the value of the performance metric and how does this compare with the resampled performance metric on the training set?**
+
+Since we tried our three models in our previous steps so out of those three the `lars` method was chosen as it had the highest $R^2$.
+
+```{r}
+lars_predict <- predict(larsTune, test_chem[ ,-1])
+
+postResample(lars_predict, test_chem[ ,1])
+```
+
+The $R^2$ is 0.718109, which is higher than the training set.
+
+**e) Which predictors are most important in the model you have trained? Do either the biological or process predictors dominate the list?**
+
+```{r}
+varImp(larsTune)
+```
+
+The 5 most important variables used in the modeling are `ManufacturingProcess32`, `ManufacturingProcess13`, `BiologicalMaterial06`, `ManufacturingProcess36`, and `ManufacturingProcess17`.
+Process predictors dominate the list. The ratio of process to biological predictors is 11:9.
+
+**f) Explore the relationships between each of the top predictors and the response. How could this information be helpful in improving yield in future runs of the manufacturing process?**
+
+```{r}
+top10 <- varImp(larsTune)$importance %>%
+  arrange(-Overall) %>%
+  head(10)
+```
+
+
+```{r}
+Chemical %>%
+  select(c("Yield", row.names(top10))) %>%
+  cor() %>%
+  corrplot()
+```
+
+
+Based on the correlation plot analysis, ManufacturingProcess32 exhibits the strongest positive correlation with Yield. Conversely, three out of the top ten variables display negative correlations with Yield. This insight could prove valuable in future iterations of the manufacturing process, as these predictors significantly influence yield. To enhance yield maximization or improvement efforts, optimizing measurements related to the manufacturing process and biological characteristics of raw materials may be beneficial.
+
+
